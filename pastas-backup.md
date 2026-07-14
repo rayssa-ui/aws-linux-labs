@@ -1,4 +1,4 @@
-# Lab 3 — Estrutura de Pastas e Backup 📁
+Estrutura de Pastas e Backup 📁
 
 ## Descrição
 Criação de estrutura de pastas e backup de arquivos na EC2.
