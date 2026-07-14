@@ -1,4 +1,4 @@
-# Lab 2 — Usuários, Vim e Nano 👥
+ Usuários, Vim e Nano 👥
 
 ## Descrição
 Gerenciamento de usuários Linux e edição de arquivos com Vim e Nano.
