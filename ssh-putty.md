@@ -1,4 +1,4 @@
-# Lab 1 — Conexão SSH com PuTTY 🔐
+Conexão SSH com PuTTY 🔐
 
 ## Descrição
 Conexão em uma instância EC2 da AWS usando PuTTY via SSH.
