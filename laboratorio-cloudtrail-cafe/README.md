@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Laboratório prático de resposta a incidentes na AWS, utilizando **AWS CloudTrail**, **Amazon Athena**, **EC2** e **AWS CLI** para investigar uma invasão ao site institucional de um café, identificar o responsável e corrigir as falhas de segurança exploradas.
+Laboratório prático de resposta a incidentes na AWS, utilizando **CloudTrail**, **Athena**, **EC2** e **AWS CLI** para investigar uma invasão ao site institucional de um café, identificar o responsável e corrigir as falhas de segurança exploradas.
 
 **Ambiente:**
 - Instância EC2: `Cafe Web Server` (Amazon Linux 2)
@@ -11,72 +11,40 @@ Laboratório prático de resposta a incidentes na AWS, utilizando **AWS CloudTra
 
 ---
 
-## Tarefa 1 — Configuração inicial e observação do site
+## O que foi feito
 
-- Acesso ao grupo de segurança da instância `Cafe Web Server`.
-- Regra de entrada original: apenas **HTTP (porta 80)** liberado para `0.0.0.0/0`.
-- Adicionada nova regra de entrada:
-  - **Tipo:** SSH
-  - **Porta:** 22
-  - **Origem:** My IP (`200.171.204.186/32`)
-- Site acessado em `http://34.219.79.222/cafe/` — funcionando normalmente.
+O laboratório começou com o site do Café funcionando normalmente, protegido apenas por uma regra de firewall liberando a porta 80 (HTTP) para o público. Adicionei uma segunda regra restringindo o acesso SSH (porta 22) apenas ao meu próprio IP, e confirmei que o site carregava normalmente.
 
----
+Em seguida, criei uma trilha do **AWS CloudTrail** (`monitor`), configurada para armazenar os logs de auditoria em um bucket S3 (`monitoring-rayssa-58291`) com criptografia SSE-KMS. Pouco depois de a trilha entrar em funcionamento, o site foi invadido: uma das imagens da página foi substituída por uma ilustração de um macaco com óculos (desfiguração clássica de site, feita só "de brincadeira"). Ao inspecionar o grupo de segurança da instância, encontrei uma **regra nova e não autorizada**, liberando a porta 22 (SSH) para `0.0.0.0/0` — ou seja, qualquer IP do mundo.
 
-## Tarefa 2 — Criação da trilha CloudTrail e detecção da invasão
+Com o CloudTrail já habilitado, parti para a investigação. Conectei via SSH (PuTTY) à instância do servidor e baixei os arquivos de log do bucket S3, extraindo-os localmente. Usando `grep`, filtrei os logs em busca do evento `AuthorizeSecurityGroupIngress` (que é o nome da ação de abrir uma porta em um grupo de segurança) e encontrei a entrada responsável pela falha: o usuário **`chaos`**, agindo a partir do IP `34.219.79.222` (a própria instância do servidor). Complementei a investigação com comandos da **AWS CLI** (`aws cloudtrail lookup-events`), que confirmaram que a ação foi executada via linha de comando (AWS CLI), não pelo console web, e que o usuário `chaos` também operou a partir de uma segunda instância (`HackerInstance`, IP `35.87.14.19`).
 
-### 2.1 Criação da trilha
-- **Nome da trilha:** `monitor`
-- **Bucket S3 criado:** `monitoring-rayssa-58291`
-- **Alias KMS:** `ra-KMS`
-- Criptografia SSE-KMS habilitada.
-- ⚠️ Obs.: primeira tentativa de nome de bucket (`monitoring1234`) falhou por já estar em uso globalmente — nomes de bucket S3 são únicos em toda a AWS.
+Para consolidar a investigação de forma mais eficiente, também criei uma tabela no **Amazon Athena** a partir dos logs do CloudTrail e rodei consultas SQL para cruzar `userName`, `eventName`, `eventTime` e `sourceIPAddress`, confirmando a mesma conclusão de forma mais rápida e legível do que vasculhar arquivo por arquivo com `grep`.
 
-### 2.2 Site invadido
-- Após recarregar o site (`Shift + refresh`), a imagem dos croissants foi substituída por uma imagem de um macaco com óculos "Be Cool" — evidência clara de desfiguração (*defacement*).
-- Verificação do grupo de segurança revelou **regra extra não autorizada**:
-
-| Porta | Protocolo | Origem      | Observação                  |
-|-------|-----------|-------------|------------------------------|
-| 80    | TCP       | 0.0.0.0/0   | Normal (HTTP público)        |
-| 22    | TCP       | 200.171.204.186/32 | Criada por nós (SSH restrito) |
-| 22    | TCP       | **0.0.0.0/0** | 🚨 **Criada pelo invasor** — SSH liberado ao mundo |
+Identificado o responsável, parti para a remediação. No sistema operacional da instância, encontrei um usuário indevido (`chaos-user`) ainda com sessão ativa, encerrei o processo dele e removi a conta. Descobri também que o arquivo de configuração do SSH (`/etc/ssh/sshd_config`) havia sido alterado no mesmo dia para permitir autenticação por senha — uma falha grave, já que normalmente só o par de chaves deveria dar acesso. Corrigi essa configuração, reiniciei o serviço SSH e removi a regra de firewall maliciosa que liberava a porta 22 para o mundo. Por fim, restaurei a imagem original do site (o próprio invasor havia deixado um backup do arquivo original) e removi o usuário `chaos` do AWS IAM, encerrando de vez o acesso dele à conta.
 
 ---
 
-## Tarefa 3 — Análise dos logs via SSH, grep e AWS CLI
+## 🕵️ Identificação do Hacker
 
-### 3.1–3.3 Conexão e download dos logs
-- Conexão via **PuTTY** (Windows) com chave `labsuser.ppk`, usuário `ec2-user`.
-- Logs baixados do bucket S3 para a instância:
-```bash
-  mkdir ctraillogs && cd ctraillogs
-  aws s3 ls
-  aws s3 cp s3://monitoring-rayssa-58291/ . --recursive
-```
-- Arquivos `.json.gz` extraídos com `gunzip *.gz`.
-
-### 3.4 Análise com grep
-Busca direta pelo evento de abertura de porta no grupo de segurança:
-```bash
-grep -l "AuthorizeSecurityGroupIngress" *.json
-```
-
-**Resultado — evidência do ataque encontrada:**
-```json
-"eventName": "AuthorizeSecurityGroupIngress",
-"sourceIPAddress": "34.219.79.222",
-"userName": "chaos"
-```
-
-### 3.5 Confirmação via AWS CLI
-```bash
-aws cloudtrail lookup-events --lookup-attributes AttributeKey=Username,AttributeValue=chaos --output text
-```
-- Confirmado uso de **AWS CLI** (`userAgent: aws-cli/1.18.147 Python/2.7.18...`) a partir da instância `HackerInstance` (IP `35.87.14.19`), não pelo Console Web.
+| Item                          | Valor                                      |
+|--------------------------------|---------------------------------------------|
+| **Usuário AWS responsável**    | `chaos`                                     |
+| **Ação maliciosa**              | `AuthorizeSecurityGroupIngress` (porta 22, origem 0.0.0.0/0) |
+| **Endereço IP de origem**       | `34.219.79.222` (própria instância Café Web Server) e `35.87.14.19` (instância HackerInstance) |
+| **Método de ataque**            | Linha de comando (AWS CLI), não via Console |
 
 ---
 
-## Tarefa 4 — Análise com Amazon Athena
+## Conclusão
 
-- Tabela Athena criada automaticamente a partir
+O incidente foi originado por um usuário IAM comprometido (`chaos`), que ganhou acesso à instância EC2, alterou a configuração SSH para permitir autenticação por senha, abriu uma regra de firewall liberando SSH para toda a internet e desfigurou o site do Café.
+
+A resposta ao incidente incluiu: identificação da causa raiz via CloudTrail e Athena, remoção do acesso do usuário malicioso (tanto no sistema operacional quanto no IAM), reversão das configurações de segurança comprometidas e restauração do conteúdo original do site.
+
+**Principais aprendizados:**
+- Importância de habilitar auditoria (CloudTrail) *antes* de incidentes ocorrerem.
+- Uso de SQL (Athena) para investigação de logs em larga escala, muito mais eficiente que `grep` manual.
+- Boas práticas reforçadas: acesso SSH restrito por IP, desabilitar autenticação por senha, princípio do menor privilégio para usuários IAM.
+
+Os comandos utilizados em cada etapa estão detalhados em [`commands.sh`](./commands.sh).
