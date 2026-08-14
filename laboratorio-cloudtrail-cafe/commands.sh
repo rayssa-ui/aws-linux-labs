@@ -3,33 +3,32 @@
 # Comandos utilizados do início ao fim
 # =========================================================
 
-# -----------------------------
-# TAREFA 3.3 - Baixar e extrair logs do CloudTrail
-# -----------------------------
-
-# Conectar via SSH (executado localmente, fora da instância)
+# Conectar via SSH ao servidor (executado localmente, fora da instância)
 # ssh -i labsuser.pem ec2-user@<ip-publico>
 
-# Criar diretório local para os logs
+# ---------------------------------------------------------
+# Baixar e extrair os logs do CloudTrail
+# ---------------------------------------------------------
+
 mkdir ctraillogs
 cd ctraillogs
 
-# Listar buckets S3 disponíveis
+# Listar buckets S3 disponíveis para confirmar o nome do bucket de logs
 aws s3 ls
 
 # Baixar todos os logs do bucket do CloudTrail
 aws s3 cp s3://monitoring-rayssa-58291/ . --recursive
 
-# Navegar até a pasta com os arquivos de log
+# Navegar até a pasta com os arquivos de log do dia
 cd AWSLogs/744639450388/CloudTrail/us-west-2/2026/08/13
 
 # Extrair os arquivos compactados
 gunzip *.gz
 
 
-# -----------------------------
-# TAREFA 3.4 - Análise com grep
-# -----------------------------
+# ---------------------------------------------------------
+# Explorar a estrutura dos logs e localizar o evento suspeito com grep
+# ---------------------------------------------------------
 
 # Ver conteúdo bruto de um log
 cat <nome_do_arquivo.json>
@@ -37,7 +36,7 @@ cat <nome_do_arquivo.json>
 # Ver conteúdo formatado (mais legível)
 cat <nome_do_arquivo.json> | python -m json.tool
 
-# Definir IP do servidor como variável
+# Definir IP do servidor como variável para facilitar buscas
 ip=34.219.79.222
 
 # Buscar todos os IPs de origem em todos os arquivos
@@ -53,17 +52,17 @@ grep -l "AuthorizeSecurityGroupIngress" *.json
 grep -B 5 -A 30 "AuthorizeSecurityGroupIngress" *.json
 
 
-# -----------------------------
-# TAREFA 3.5 - Análise com AWS CLI (CloudTrail lookup-events)
-# -----------------------------
+# ---------------------------------------------------------
+# Confirmar a investigação usando a AWS CLI
+# ---------------------------------------------------------
 
-# Buscar eventos de login no console
+# Verificar se houve logins pelo console
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=ConsoleLogin
 
-# Buscar ações realizadas em Security Groups
+# Buscar todas as ações realizadas em Security Groups
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=ResourceType,AttributeValue=AWS::EC2::SecurityGroup --output text
 
-# Obter região e ID do security group do servidor Café
+# Obter automaticamente a região e o ID do security group do servidor Café
 region=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document | grep region | cut -d '"' -f4)
 sgId=$(aws ec2 describe-instances --filters "Name=tag:Name,Values='Cafe Web Server'" --query 'Reservations[*].Instances[*].SecurityGroups[*].[GroupId]' --region $region --output text)
 echo $sgId
@@ -71,13 +70,13 @@ echo $sgId
 # Filtrar eventos apenas do security group do servidor Café
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=ResourceType,AttributeValue=AWS::EC2::SecurityGroup --region $region --output text | grep $sgId
 
-# Buscar todos os eventos realizados pelo usuário suspeito
+# Buscar todos os eventos realizados pelo usuário suspeito identificado
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=Username,AttributeValue=chaos --output text
 
 
-# -----------------------------
-# TAREFA 4 - Consultas SQL no Amazon Athena
-# -----------------------------
+# ---------------------------------------------------------
+# Consultas SQL no Amazon Athena para cruzar os dados de forma mais rápida
+# ---------------------------------------------------------
 
 -- Consulta exploratória inicial
 SELECT * FROM cloudtrail_logs_monitoring_rayssa_58291 LIMIT 5;
@@ -109,17 +108,17 @@ WHERE from_iso8601_timestamp(eventtime) > date_add('day', -1, now())
 ORDER BY eventSource;
 
 
-# -----------------------------
-# TAREFA 5.1 - Verificar e remover usuário do sistema operacional
-# -----------------------------
+# ---------------------------------------------------------
+# Remover o acesso do invasor e corrigir o sistema operacional
+# ---------------------------------------------------------
 
-# Ver histórico de logins no SO
+# Ver histórico de logins no sistema operacional
 sudo aureport --auth
 
 # Ver quem está conectado no momento
 who
 
-# Tentar remover o usuário do SO (pode falhar se ele estiver logado)
+# Tentar remover o usuário indevido do SO (pode falhar se ele ainda estiver logado)
 sudo userdel -r chaos-user
 
 # Encerrar a sessão ativa do usuário (usar o PID retornado pelo comando anterior)
@@ -135,9 +134,9 @@ sudo userdel -r chaos-user
 sudo cat /etc/passwd | grep -v nologin
 
 
-# -----------------------------
-# TAREFA 5.2 - Corrigir configuração SSH
-# -----------------------------
+# ---------------------------------------------------------
+# Corrigir a configuração SSH que havia sido comprometida
+# ---------------------------------------------------------
 
 # Ver data de modificação do arquivo de configuração SSH
 sudo ls -l /etc/ssh/sshd_config
@@ -150,18 +149,18 @@ sudo vi /etc/ssh/sshd_config
 sudo service sshd restart
 
 
-# -----------------------------
-# TAREFA 5.3 - Restaurar o site
-# -----------------------------
+# ---------------------------------------------------------
+# Restaurar o site ao estado original
+# ---------------------------------------------------------
 
 cd /var/www/html/cafe/images/
 ls -l
 
-# Restaurar a imagem original a partir do backup deixado pelo invasor
+# Restaurar a imagem original a partir do backup deixado pelo próprio invasor
 sudo mv Coffee-and-Pastries.backup Coffee-and-Pastries.jpg
 
 
-# -----------------------------
-# TAREFA 5.4 - Remover usuário malicioso do IAM
-# -----------------------------
-# (Executado via Console da AWS: IAM > Usuários > selecionar "chaos" > Excluir)
+# ---------------------------------------------------------
+# Remover o acesso do usuário malicioso na conta AWS
+# ---------------------------------------------------------
+# Executado via Console da AWS: IAM > Usuários > selecionar "chaos" > Excluir
